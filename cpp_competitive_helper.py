@@ -1,5 +1,5 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 5.1 - [UI] 抽离 UI 到模板文件，实现静态视觉复刻
+# 版本 5.3 - [强力调试] 使用弹窗对话框追踪执行流程
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
@@ -13,14 +13,24 @@ ui_views = {}
 
 class CphToggleUiCommand(sublime_plugin.WindowCommand):
     def run(self):
+        # --- 弹窗调试 1 ---
+        sublime.message_dialog("调试步骤 1: CphToggleUiCommand 命令已触发。")
+        
         window = self.window
         cpp_view = window.active_view()
+        
         if not cpp_view or not cpp_view.file_name():
+            sublime.message_dialog("调试信息：命令退出，因为当前没有活动的或未保存的文件。")
             return
+
+        # --- 弹窗调试 2 ---
+        sublime.message_dialog("调试步骤 2: 当前活动文件是 {}".format(cpp_view.file_name()))
 
         ui_sheet_id = ui_views.get(cpp_view.id())
         
         if ui_sheet_id:
+            # 关闭逻辑暂时简化，因为我们主要调试打开流程
+            sublime.message_dialog("调试信息：检测到UI已存在，将执行关闭流程。")
             ui_sheet = self.find_sheet_by_id(window, ui_sheet_id)
             if ui_sheet:
                 ui_sheet.close()
@@ -28,15 +38,27 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
 
         file_path = cpp_view.file_name()
         if not file_path.endswith('.cpp'):
+            sublime.message_dialog("调试信息：命令退出，因为当前文件不是 .cpp 文件。")
             return
 
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         test_file_path = os.path.join(os.path.expanduser('~'), 'c++', 'data', 'input', base_name + '_test.txt')
 
-        if not os.path.exists(test_file_path):
-            sublime.status_message("未找到对应的测试文件: {}".format(test_file_path))
+        # --- 弹窗调试 3 ---
+        sublime.message_dialog("调试步骤 3: 正在查找测试文件，路径为:\n{}".format(test_file_path))
+        
+        file_exists = os.path.exists(test_file_path)
+
+        # --- 弹窗调试 4 ---
+        sublime.message_dialog("调试步骤 4: 文件是否存在? -> {}".format(file_exists))
+
+        if not file_exists:
             return
 
+        # --- 弹窗调试 5 ---
+        sublime.message_dialog("调试步骤 5: 文件已找到，即将创建HTML界面。")
+
+        # 后续逻辑不变
         window.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
         window.set_view_index(cpp_view, 0, 0)
         
@@ -46,51 +68,30 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
             
             html_content = self.generate_html(base_name, test_cases)
             
+            # --- 弹窗调试 6 ---
+            sublime.message_dialog("调试步骤 6: HTML内容已生成，即将调用 new_html_sheet。")
+
             ui_sheet = window.new_html_sheet("测试用例: {}".format(base_name), html_content, group=1)
             ui_views[cpp_view.id()] = ui_sheet.id()
             window.focus_view(cpp_view)
 
         except Exception as e:
-            sublime.error_message("加载或渲染测试用例失败: {}".format(e))
+            sublime.error_message("加载或渲染时发生未预料的错误: {}".format(e))
             window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
             
     def generate_html(self, problem_name, test_cases):
         try:
-            # 从插件包中加载 HTML 模板
             template = sublime.load_resource("Packages/cph-sublime/ui_template.html")
         except IOError:
             return "错误：找不到 ui_template.html 文件！"
-
         test_cases_html = ""
         for i, case in enumerate(test_cases):
             test_input = cgi.escape(case.get('test', 'N/A'))
             answers_html = "<br>".join([cgi.escape(ans) for ans in case.get('correct_answers', [])])
-
-            case_html = """
-            <details open>
-                <summary>
-                    <span class="case-title">TC {}</span>
-                    <div class="case-buttons">
-                        <a href="run:{}" class="run-btn">▶</a>
-                        <a href="delete:{}" class="del-btn">🗑</a>
-                    </div>
-                </summary>
-                <div class="content-block">
-                    <h4><span>Input:</span><a class="copy-btn" href="copy_in:{}">Copy</a></h4>
-                    <pre>{}</pre>
-                </div>
-                <div class="content-block">
-                    <h4><span>Expected Output:</span><a class="copy-btn" href="copy_out:{}">Copy</a></h4>
-                    <pre>{}</pre>
-                </div>
-            </details>
-            """.format(i + 1, i, i, i, test_input, i, answers_html)
+            case_html = "<details open><summary><span class='case-title'>TC {}</span><div class='case-buttons'><a href='run:{}' class='run-btn'>▶</a><a href='delete:{}' class='del-btn'>🗑</a></div></summary><div class='content-block'><h4><span>Input:</span><a class='copy-btn' href='copy_in:{}'>Copy</a></h4><pre>{}</pre></div><div class='content-block'><h4><span>Expected Output:</span><a class='copy-btn' href='copy_out:{}'>Copy</a></h4><pre>{}</pre></div></details>".format(i + 1, i, i, i, test_input, i, answers_html)
             test_cases_html += case_html
-
-        # 替换模板中的占位符
         final_html = template.replace("{problem_name}", cgi.escape(problem_name))
         final_html = final_html.replace("{test_cases_html}", test_cases_html)
-        
         return final_html
 
     def find_sheet_by_id(self, window, sheet_id):
@@ -99,11 +100,12 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
                 return sheet
         return None
 
+# EventListener 和 RunTestsCommand 保持不变，请确保它们在您的文件中
 class CphUiCleanupListener(sublime_plugin.EventListener):
     def on_pre_close(self, sheet):
         closed_id = sheet.id()
         if closed_id in ui_views:
-            window = sheet.window();
+            window = sheet.window()
             if not window: return
             ui_sheet_id = ui_views.get(closed_id)
             del ui_views[closed_id]
@@ -126,7 +128,6 @@ class CphUiCleanupListener(sublime_plugin.EventListener):
             if window and not any(s.id() in ui_views.values() for s in window.sheets()):
                 window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
 
-# CphRunTestsCommand 保持不变
 class CphRunTestsCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         self.view.run_command("save")

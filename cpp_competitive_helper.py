@@ -7,6 +7,7 @@ import sublime_plugin
 import subprocess
 import os
 import json
+import cgi # 用于 HTML 转义
 
 # 全局变量来追踪 UI 视图: { 'cpp_view_id': html_sheet_id }
 ui_views = {}
@@ -28,9 +29,7 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
         if ui_sheet_id:
             ui_sheet = self.find_sheet_by_id(window, ui_sheet_id)
             if ui_sheet:
-                ui_sheet.close() # 使用 sheet.close() 是最安全的关闭方法
-            
-            # on_pre_close 事件会自动处理字典清理和布局恢复
+                ui_sheet.close() # 关闭操作会自动触发下面的 EventListener 进行清理
             return
 
         # --- 情况二：UI 未打开，现在需要创建它 ---
@@ -54,44 +53,69 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
             with open(test_file_path, 'r') as f:
                 test_cases = json.load(f)
             
-            # 使用 HTML 格式化内容
-            html_content = self.generate_html(test_cases)
+            html_content = self.generate_html(base_name, test_cases)
             
             # 核心API：直接创建 HTML Sheet
             ui_sheet = window.new_html_sheet("测试用例: {}".format(base_name), html_content, group=1)
-            
-            # 记录 C++ 视图和 UI Sheet 的对应关系
             ui_views[cpp_view.id()] = ui_sheet.id()
             window.focus_view(cpp_view)
 
         except Exception as e:
-            sublime.error_message("加载测试用例失败: {}".format(e))
+            sublime.error_message("加载或渲染测试用例失败: {}".format(e))
             # 如果失败了，恢复单栏布局
             window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
             
-    def generate_html(self, test_cases):
-        # 使用简单的 HTML 和 CSS 来美化界面
-        # 注意：Sublime 的 minihtml 支持有限的 CSS
+    def generate_html(self, problem_name, test_cases):
+        # 模仿 VS Code CPH 的风格
         styles = """
         <style>
-            body { padding: 10px; font-family: sans-serif; }
-            h3 { color: #4e8ed6; border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 20px;}
-            h4 { color: #999; }
-            pre { background-color: #222; padding: 10px; border-radius: 5px; font-family: monospace; }
+            body { 
+                --vscode-editor-background: #1f1f1f;
+                --vscode-sideBar-background: #181818;
+                --vscode-foreground: #cccccc;
+                --vscode-focusBorder: #0078d4;
+                --vscode-widget-border: #454545;
+                --vscode-textPreformat-background: #2b2b2b;
+                
+                font-family: sans-serif; 
+                background-color: var(--vscode-sideBar-background);
+                color: var(--vscode-foreground);
+                padding: 15px;
+            }
+            .case { 
+                border: 1px solid var(--vscode-widget-border);
+                border-radius: 5px; 
+                margin-bottom: 15px;
+                padding: 10px;
+                background-color: var(--vscode-editor-background);
+            }
+            .case-title { font-weight: bold; color: var(--vscode-focusBorder); }
+            h4 { margin-top: 10px; margin-bottom: 5px; color: #9d9d9d; }
+            pre { 
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                background-color: var(--vscode-textPreformat-background);
+                padding: 10px;
+                border-radius: 3px;
+                font-family: monospace;
+            }
         </style>
         """
-        body = ""
+        body = "<h1>{}</h1>".format(cgi.escape(problem_name))
         for i, case in enumerate(test_cases):
-            test_input = case.get('test', 'N/A').replace('\n', '<br>')
+            # cgi.escape 用于防止内容中的 < > & 等符号破坏 HTML 结构
+            test_input = cgi.escape(case.get('test', 'N/A'))
             
             answers_html = ""
             answers = case.get('correct_answers', [])
             for ans in answers:
-                answers_html += ans.replace('\n', '<br>') + "<br>"
+                answers_html += cgi.escape(ans) + "<br>"
 
-            body += "<h3>测试点 #{}</h3>".format(i + 1)
+            body += "<div class='case'>"
+            body += "<span class='case-title'>测试点 #{}</span>".format(i + 1)
             body += "<h4>输入 (Input):</h4><pre>{}</pre>".format(test_input)
             body += "<h4>答案 (Answers):</h4><pre>{}</pre>".format(answers_html)
+            body += "</div>"
 
         return styles + body
 
@@ -101,35 +125,27 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
                 return sheet
         return None
 
-# --- 这个监听器现在只负责清理工作 ---
+# --- 这个监听器现在只负责在关闭视图时，进行联动关闭和布局恢复 ---
 class CphUiCleanupListener(sublime_plugin.EventListener):
-    def on_pre_close(self, view_or_sheet):
-        # view_or_sheet 可以是 View 也可以是 Sheet
-        closed_id = view_or_sheet.id()
+    def on_pre_close(self, sheet):
+        closed_id = sheet.id()
 
-        # 情况一：如果关闭的是一个 C++ 文件
+        # 情况一：如果关闭的是 C++ 文件
         if closed_id in ui_views:
-            window = view_or_sheet.window()
+            window = sheet.window()
             if not window: return
             
             ui_sheet_id = ui_views.get(closed_id)
             ui_sheet = CphToggleUiCommand.find_sheet_by_id(CphToggleUiCommand, window, ui_sheet_id)
             
-            if ui_sheet:
-                # 标记正在被插件关闭，防止触发自己的 on_pre_close 时再次进入逻辑
-                ui_sheet.settings().set('is_closing_by_plugin', True)
-                ui_sheet.close()
-            
+            # 从字典中删除，打破对应关系
             del ui_views[closed_id]
-            # 如果没有其他 UI 了，恢复布局
-            if not ui_views:
-                window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+            
+            if ui_sheet:
+                ui_sheet.close()
 
         # 情况二：如果关闭的是 UI Sheet
         elif closed_id in ui_views.values():
-            if view_or_sheet.settings().get('is_closing_by_plugin'):
-                return # 如果是插件自己关的，就不用再处理了
-            
             cpp_id_to_delete = None
             for cpp_id, ui_id in list(ui_views.items()):
                 if ui_id == closed_id:
@@ -139,11 +155,12 @@ class CphUiCleanupListener(sublime_plugin.EventListener):
             if cpp_id_to_delete is not None:
                 del ui_views[cpp_id_to_delete]
             
-            # 如果没有其他 UI 了，恢复布局
-            if not ui_views:
-                window = view_or_sheet.window()
-                if window:
-                     window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+            # 只要UI视图都关了，就恢复单栏
+            if not any(self.is_our_ui_sheet(s) for s in sheet.window().sheets()):
+                 sheet.window().set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+    
+    def is_our_ui_sheet(self, sheet):
+        return sheet.id() in ui_views.values()
 
 # --- 测试运行命令保持不变 ---
 class CphRunTestsCommand(sublime_plugin.TextCommand):

@@ -1,5 +1,5 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 4.1 - [BUG修复] 使用更可靠的方式向 UI 视图写入内容
+# 版本 4.2 - [架构修复] 使用 WindowCommand 和 TextCommand 的正确组合，解决 TypeError 崩溃问题
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
@@ -11,14 +11,16 @@ import json
 # 全局变量来追踪 UI 视图: { 'cpp_view_id': ui_view_id }
 ui_views = {}
 
-class CphToggleUiCommand(sublime_plugin.TextCommand):
-    """
-    主命令：用于“打开”或“关闭”右侧的测试用例 UI 面板。
-    """
-    def run(self, edit):
-        window = self.view.window()
-        cpp_view = self.view
+# --- 主命令改为 WindowCommand，因为它操作的是窗口布局和多视图 ---
+class CphToggleUiCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        window = self.window
+        # WindowCommand 没有直接的 self.view，我们需要获取当前活动的视图
+        cpp_view = window.active_view()
         
+        if not cpp_view or not cpp_view.file_name():
+            return
+
         ui_view_id = ui_views.get(cpp_view.id())
         
         # --- 情况一：UI 已打开，现在需要关闭它 ---
@@ -38,7 +40,7 @@ class CphToggleUiCommand(sublime_plugin.TextCommand):
 
         # --- 情况二：UI 未打开，现在需要创建它 ---
         file_path = cpp_view.file_name()
-        if not file_path or not file_path.endswith('.cpp'):
+        if not file_path.endswith('.cpp'):
             return
 
         base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -57,7 +59,6 @@ class CphToggleUiCommand(sublime_plugin.TextCommand):
         ui_view.set_name("测试用例: {}".format(base_name))
         ui_view.set_scratch(True)
         
-        # 加载并渲染内容
         try:
             with open(test_file_path, 'r') as f:
                 test_cases = json.load(f)
@@ -73,26 +74,15 @@ class CphToggleUiCommand(sublime_plugin.TextCommand):
                     content += "{}\n".format(ans)
                 content += "\n"
             
-            # --- 核心改动在这里：使用更直接的方式更新内容 ---
-            self.update_view_content(ui_view, content)
-            
-            window.focus_view(cpp_view)
+            # 核心改动：调用一个 TextCommand 来安全地写入内容
+            ui_view.run_command('_cph_update_view_content', {'content': content})
 
         except Exception as e:
             error_content = "加载测试用例失败: {}".format(e)
-            self.update_view_content(ui_view, error_content)
-    
-    def update_view_content(self, view, content):
-        """一个辅助方法，使用 begin_edit/end_edit 来安全地修改视图内容"""
-        view.set_read_only(False)
-        # begin_edit() 的第一个参数在 Python 3.3 的 API 中是可选的
-        edit = view.begin_edit()
-        try:
-            view.replace(edit, sublime.Region(0, view.size()), content)
-        finally:
-            # 必须调用 end_edit 来结束编辑操作
-            view.end_edit(edit)
-        view.set_read_only(True)
+            ui_view.run_command('_cph_update_view_content', {'content': error_content})
+        
+        # 将焦点还给 C++ 文件
+        window.focus_view(cpp_view)
 
     def find_view_by_id(self, window, view_id):
         for view in window.views():
@@ -100,7 +90,13 @@ class CphToggleUiCommand(sublime_plugin.TextCommand):
                 return view
         return None
 
-# `_CphUpdateViewContentCommand` 已被删除
+# --- 重新引入这个内部辅助命令，它是一个 TextCommand ---
+class _CphUpdateViewContentCommand(sublime_plugin.TextCommand):
+    def run(self, edit, content=''):
+        self.view.set_read_only(False)
+        self.view.erase(edit, sublime.Region(0, self.view.size()))
+        self.view.insert(edit, 0, content)
+        self.view.set_read_only(True)
 
 # CphRunTestsCommand 保持不变
 class CphRunTestsCommand(sublime_plugin.TextCommand):

@@ -1,5 +1,5 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 3.4 - [调试] 增加路径查找的状态栏调试信息 (完整版)
+# 版本 4.0 - [重构] 废除 EventListener，改为手动开关式 UI
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
@@ -8,74 +8,65 @@ import subprocess
 import os
 import json
 
+# 全局变量来追踪 UI 视图: { 'cpp_view_id': ui_view_id }
 ui_views = {}
 
-class CppHelperEventListener(sublime_plugin.EventListener):
-    def on_activated(self, view):
-        file_path = view.file_name()
-        if file_path and file_path.endswith('.cpp'):
-            view.run_command('cpp_helper_show_ui')
-
-    def on_pre_close(self, view):
-        view_id = view.id()
-        if view_id in ui_views:
-            ui_view = sublime.View(ui_views[view_id])
-            del ui_views[view_id]
-            if ui_view and ui_view.is_valid():
-                ui_view.set_scratch(False)
-                ui_view.window().run_command("close_file")
-        elif view_id in ui_views.values():
-            cpp_id_to_delete = None
-            for cpp_id, ui_id in list(ui_views.items()):
-                if ui_id == view_id:
-                    cpp_id_to_delete = cpp_id
-                    break
-            if cpp_id_to_delete is not None and cpp_id_to_delete in ui_views:
-                del ui_views[cpp_id_to_delete]
-
-class CppHelperShowUiCommand(sublime_plugin.TextCommand):
+class CphToggleUiCommand(sublime_plugin.TextCommand):
+    """
+    主命令：用于“打开”或“关闭”右侧的测试用例 UI 面板。
+    """
     def run(self, edit):
         window = self.view.window()
-        if not window: return
         cpp_view = self.view
-        file_path = cpp_view.file_name()
-        if not file_path: return
         
+        # 检查是否已为当前 CPP 文件打开了 UI
+        ui_view_id = ui_views.get(cpp_view.id())
+        
+        # --- 情况一：UI 已打开，现在需要关闭它 ---
+        if ui_view_id:
+            ui_view = self.find_view_by_id(window, ui_view_id)
+            if ui_view and ui_view.is_valid():
+                # 先关闭视图
+                ui_view.set_scratch(False)
+                window.focus_view(ui_view)
+                window.run_command("close_file")
+            
+            # 从追踪字典中移除
+            del ui_views[cpp_view.id()]
+            
+            # 恢复单栏布局
+            window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+            window.focus_view(cpp_view) # 将焦点还给 C++ 文件
+            return
+
+        # --- 情况二：UI 未打开，现在需要创建它 ---
+        file_path = cpp_view.file_name()
+        if not file_path or not file_path.endswith('.cpp'):
+            return
+
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         test_file_path = os.path.join(os.path.expanduser('~'), 'c++', 'data', 'input', base_name + '_test.txt')
 
-        # --- 核心调试改动在这里 ---
         if not os.path.exists(test_file_path):
-            # 在 Sublime 底部状态栏显示“未找到”
-            sublime.status_message("调试信息：未找到测试文件 -> {}".format(test_file_path))
+            sublime.status_message("未找到对应的测试文件: {}".format(test_file_path))
             return
-        else:
-            # 在 Sublime 底部状态栏显示“已找到”
-            sublime.status_message("调试信息：已找到测试文件 -> {}".format(test_file_path))
-        
-        # --- 后续逻辑和上一版完全一样 ---
-        ui_view = None
-        ui_view_id = ui_views.get(cpp_view.id())
-        if ui_view_id:
-            for v in window.views():
-                if v.id() == ui_view_id:
-                    ui_view = v
-                    break
-        
-        if not ui_view or not ui_view.is_valid():
-            if window.num_groups() != 2:
-                layout = {"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]}
-                window.set_layout(layout)
-            window.set_view_index(cpp_view, 0, 0)
-            ui_view = window.new_file()
-            window.set_view_index(ui_view, 1, 0)
-            ui_views[cpp_view.id()] = ui_view.id()
-            ui_view.set_name("测试用例: {}".format(base_name))
-            ui_view.set_scratch(True)
 
+        # 设置两栏布局
+        window.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
+        window.set_view_index(cpp_view, 0, 0)
+        
+        # 创建新视图
+        ui_view = window.new_file()
+        window.set_view_index(ui_view, 1, 0)
+        ui_views[cpp_view.id()] = ui_view.id()
+        ui_view.set_name("测试用例: {}".format(base_name))
+        ui_view.set_scratch(True)
+        
+        # 加载并渲染内容
         try:
             with open(test_file_path, 'r') as f:
                 test_cases = json.load(f)
+            
             content = "测试文件: {}\n".format(test_file_path)
             content += "=" * 40 + "\n\n"
             for i, case in enumerate(test_cases):
@@ -86,25 +77,41 @@ class CppHelperShowUiCommand(sublime_plugin.TextCommand):
                 for ans in answers:
                     content += "{}\n".format(ans)
                 content += "\n"
-            ui_view.set_read_only(False)
-            ui_view.replace(edit, sublime.Region(0, ui_view.size()), content)
+            
+            # 调用内部命令来更新视图内容
+            ui_view.run_command('_cph_update_view_content', {'content': content})
             ui_view.set_read_only(True)
-        except Exception as e:
-            ui_view.set_read_only(False)
-            error_message = "加载测试用例失败: {}".format(e)
-            ui_view.replace(edit, sublime.Region(0, ui_view.size()), error_message)
-            ui_view.set_read_only(True)
+            window.focus_view(cpp_view) # 将焦点还给 C++ 文件
 
-# CppHelperRunTestsCommand 保持不变
-class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
+        except Exception as e:
+            ui_view.run_command('_cph_update_view_content', {'content': "加载测试用例失败: {}".format(e)})
+    
+    def find_view_by_id(self, window, view_id):
+        for view in window.views():
+            if view.id() == view_id:
+                return view
+        return None
+
+class _CphUpdateViewContentCommand(sublime_plugin.TextCommand):
+    """
+    一个内部使用的辅助命令，专门用于安全地修改视图内容。
+    不能从外部直接调用。
+    """
+    def run(self, edit, content=''):
+        self.view.set_read_only(False)
+        self.view.replace(edit, sublime.Region(0, self.view.size()), content)
+        self.view.set_read_only(True)
+
+# CppHelperRunTestsCommand 保持不变，但我们改个名以统一风格
+class CphRunTestsCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         self.view.run_command("save")
         self.file_path = self.view.file_name()
         if not self.file_path or not self.file_path.endswith('.cpp'):
             sublime.status_message("错误：请先在 C++ (.cpp) 文件中执行此命令")
             return
-        self.output_panel = self.view.window().create_output_panel("cpp_helper_output")
-        self.view.window().run_command("show_panel", {"panel": "output.cpp_helper_output"})
+        self.output_panel = self.view.window().create_output_panel("cph_output")
+        self.view.window().run_command("show_panel", {"panel": "output.cph_output"})
         self.log("自动化测试开始... (已自动保存)")
         try:
             base_name = os.path.splitext(os.path.basename(self.file_path))[0]
@@ -154,6 +161,7 @@ class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
 
     def log(self, message):
         self.output_panel.run_command("append", {"characters": message + "\n"})
+        
     def compile_cpp(self):
         base_name = os.path.splitext(self.file_path)[0]
         executable_path = base_name
@@ -167,6 +175,7 @@ class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
             return None
         self.log("编译成功, 可执行文件位于: {}".format(executable_path))
         return executable_path
+
     def run_single_test(self, executable_path, test_input):
         run_command = ["stdbuf", "-oL", executable_path]
         process = subprocess.Popen(run_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

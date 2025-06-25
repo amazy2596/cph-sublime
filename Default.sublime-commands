@@ -1,0 +1,10 @@
+[
+    {
+        "caption": "CPH: Toggle Test Case UI",
+        "command": "cph_toggle_ui"
+    },
+    {
+        "caption": "CPH: Run Tests",
+        "command": "cph_run_tests"
+    }
+]

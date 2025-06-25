@@ -1,5 +1,4 @@
-// 修改后的版本
 [
-    { "keys": ["f1"], "command": "cpp_helper_run_tests" },
-    { "keys": ["f2"], "command": "cpp_helper_test_wsl" }
+    { "keys": ["f1"], "command": "cph_toggle_ui" },
+    { "keys": ["f2"], "command": "cph_run_tests" }
 ]

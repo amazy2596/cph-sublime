@@ -1,120 +1,112 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body {
-            /* 模仿 VS Code CPH 的颜色变量 */
-            --vscode-editor-background: #1f1f1f;
-            --vscode-sideBar-background: #181818;
-            --vscode-foreground: #cccccc;
-            --vscode-focusBorder: #0078d4;
-            --vscode-widget-border: #454545;
-            --vscode-textPreformat-background: #2b2b2b;
-            --vscode-button-background: #313131;
-            --vscode-button-hoverBackground: #3c3c3c;
-            --green-button-background: #2ea043;
-            --red-button-background: #f85149;
-            --green-indicator: #2ea043;
-            --red-indicator: #f14c4c;
-            --yellow-indicator: #cca700;
+<style>
+    /* 模仿 VS Code CPH 的颜色变量 */
+    body { /* body 选择器在 minihtml 中依然有效，它会应用到 minihtml 的根元素上 */
+        --vscode-editor-background: #1f1f1f;
+        --vscode-sideBar-background: #181818;
+        --vscode-foreground: #cccccc;
+        --vscode-focusBorder: #0078d4;
+        --vscode-widget-border: #454545;
+        --vscode-textPreformat-background: #2b2b2b;
+        --vscode-button-background: #313131;
+        --vscode-button-hoverBackground: #3c3c3c;
+        --green-button-background: #2ea043;
+        --red-button-background: #f85149;
 
-            font-family: sans-serif;
-            background-color: var(--vscode-sideBar-background);
-            color: var(--vscode-foreground);
-            padding: 10px;
-        }
-        a {
-            color: var(--vscode-focusBorder);
-            text-decoration: none;
-        }
-        h1 {
-            font-size: 1.5em;
-            margin: 5px 0 20px 0;
-        }
-        details { /* 可折叠的测试用例块 */
-            border-left: 3px solid var(--vscode-widget-border);
-            border-radius: 5px;
-            margin-bottom: 15px;
-            background-color: var(--vscode-editor-background);
-            padding: 10px;
-            transition: border-color 0.3s ease;
-        }
-        summary { /* 测试用例标题行 */
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        summary::-webkit-details-marker { display: none; } /* 隐藏默认的三角箭头 */
-        
-        .case-title {
-            color: var(--vscode-focusBorder);
-        }
-        .case-buttons a {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 3px;
-            margin-left: 5px;
-        }
-        .run-btn { background-color: var(--green-button-background); }
-        .del-btn { background-color: var(--red-button-background); }
+        font-family: sans-serif; 
+        background-color: var(--vscode-sideBar-background);
+        color: var(--vscode-foreground);
+        padding: 15px;
+    }
+    a {
+        color: var(--vscode-focusBorder);
+        text-decoration: none;
+    }
+    h1 {
+        font-size: 1.5em;
+        margin: 5px 0 20px 0;
+    }
+    details { /* 可折叠的测试用例块 */
+        border-left: 3px solid var(--vscode-widget-border);
+        border-radius: 5px; 
+        margin-bottom: 15px;
+        background-color: var(--vscode-editor-background);
+        padding: 10px;
+        transition: border-color 0.3s ease;
+    }
+    summary { /* 测试用例标题行 */
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-weight: bold;
+        cursor: pointer;
+        outline: none; /* 隐藏点击时的虚线框 */
+    }
+    summary::-webkit-details-marker { display: none; } /* 隐藏默认的三角箭头 */
+    
+    .case-title {
+        color: var(--vscode-focusBorder);
+    }
+    .case-buttons a {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 3px;
+        margin-left: 5px;
+        color: white;
+    }
+    .run-btn { background-color: var(--green-button-background); }
+    .del-btn { background-color: var(--red-button-background); }
 
-        .content-block { margin-top: 15px; }
-        .content-block h4 {
-            margin: 10px 0 5px 0;
-            color: #9d9d9d;
-            font-size: 0.9em;
-            display: flex;
-            justify-content: space-between;
-        }
-        .content-block h4 .copy-btn { font-size: 0.9em; color: #9d9d9d; }
+    .content-block { margin-top: 15px; }
+    .content-block h4 {
+        margin: 10px 0 5px 0;
+        color: #9d9d9d;
+        font-size: 0.9em;
+        display: flex;
+        justify-content: space-between;
+    }
+    .content-block h4 .copy-btn { font-size: 0.9em; color: #9d9d9d; }
 
-        pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            background-color: var(--vscode-textPreformat-background);
-            padding: 10px;
-            border-radius: 3px;
-            font-family: monospace;
-            margin: 0;
-        }
-        .global-buttons {
-            margin-top: 20px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        .global-buttons a {
-            flex-grow: 1;
-            text-align: center;
-            padding: 8px;
-            border-radius: 3px;
-            background-color: var(--vscode-button-background);
-            color: var(--vscode-foreground);
-        }
-        .global-buttons a:hover {
-            background-color: var(--vscode-button-hoverBackground);
-        }
-    </style>
-</head>
-<body>
-    <h1>{problem_name}</h1>
-    <div class="test-cases">
-        {test_cases_html}
-    </div>
-    <div class="global-buttons">
-        <a href="new_case">✚ New TestCase</a>
-    </div>
-    <div class="global-buttons">
-        <a href="run_all">► Run All</a>
-        <a href="new_case">✚ New</a>
-    </div>
-    <div class="global-buttons">
-        <a href="stop_all">■ Stop</a>
-        <a href="info">ⓘ Info</a>
-        <a href="delete_all" style="background-color: var(--red-button-background);">🗑 Delete</a>
-    </div>
-</body>
-</html>
+    pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        background-color: var(--vscode-textPreformat-background);
+        padding: 10px;
+        border-radius: 3px;
+        font-family: monospace;
+        margin: 0;
+    }
+    .global-buttons {
+        margin-top: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .global-buttons a {
+        flex-grow: 1;
+        text-align: center;
+        padding: 8px;
+        border-radius: 3px;
+        background-color: var(--vscode-button-background);
+        color: var(--vscode-foreground);
+    }
+    .global-buttons a:hover {
+        background-color: var(--vscode-button-hoverBackground);
+    }
+</style>
+
+<h1>{problem_name}</h1>
+<div class="test-cases">
+    {test_cases_html}
+</div>
+<div class="global-buttons">
+    <a href="new_case">✚ New TestCase</a>
+</div>
+<div class="global-buttons">
+    <a href="run_all">► Run All</a>
+    <a href="new_case">✚ New</a>
+</div>
+<div class="global-buttons">
+    <a href="stop_all">■ Stop</a>
+    <a href="info">ⓘ Info</a>
+    <a href="delete_all" style="background-color: var(--red-button-background);">🗑 Delete</a>
+</div>

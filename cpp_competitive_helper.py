@@ -1,5 +1,5 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 5.3 - [强力调试] 使用弹窗对话框追踪执行流程
+# 版本 5.3 - [UI] 视觉复刻，使用兼容性更好的 CSS 布局
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
@@ -9,56 +9,35 @@ import os
 import json
 import cgi
 
+# 全局变量来追踪 UI 视图: { 'cpp_view_id': html_sheet_id }
 ui_views = {}
 
 class CphToggleUiCommand(sublime_plugin.WindowCommand):
+    """
+    主命令：使用正确的 new_html_sheet API 打开或关闭右侧的 HTML 测试用例面板。
+    """
     def run(self):
-        # --- 弹窗调试 1 ---
-        sublime.message_dialog("调试步骤 1: CphToggleUiCommand 命令已触发。")
-        
         window = self.window
         cpp_view = window.active_view()
-        
-        if not cpp_view or not cpp_view.file_name():
-            sublime.message_dialog("调试信息：命令退出，因为当前没有活动的或未保存的文件。")
-            return
-
-        # --- 弹窗调试 2 ---
-        sublime.message_dialog("调试步骤 2: 当前活动文件是 {}".format(cpp_view.file_name()))
+        if not cpp_view or not cpp_view.file_name(): return
 
         ui_sheet_id = ui_views.get(cpp_view.id())
         
         if ui_sheet_id:
-            # 关闭逻辑暂时简化，因为我们主要调试打开流程
-            sublime.message_dialog("调试信息：检测到UI已存在，将执行关闭流程。")
             ui_sheet = self.find_sheet_by_id(window, ui_sheet_id)
-            if ui_sheet:
-                ui_sheet.close()
+            if ui_sheet: ui_sheet.close()
             return
 
         file_path = cpp_view.file_name()
-        if not file_path.endswith('.cpp'):
-            sublime.message_dialog("调试信息：命令退出，因为当前文件不是 .cpp 文件。")
-            return
+        if not file_path.endswith('.cpp'): return
 
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         test_file_path = os.path.join(os.path.expanduser('~'), 'c++', 'data', 'input', base_name + '_test.txt')
 
-        # --- 弹窗调试 3 ---
-        sublime.message_dialog("调试步骤 3: 正在查找测试文件，路径为:\n{}".format(test_file_path))
-        
-        file_exists = os.path.exists(test_file_path)
-
-        # --- 弹窗调试 4 ---
-        sublime.message_dialog("调试步骤 4: 文件是否存在? -> {}".format(file_exists))
-
-        if not file_exists:
+        if not os.path.exists(test_file_path):
+            sublime.status_message("未找到对应的测试文件: {}".format(test_file_path))
             return
 
-        # --- 弹窗调试 5 ---
-        sublime.message_dialog("调试步骤 5: 文件已找到，即将创建HTML界面。")
-
-        # 后续逻辑不变
         window.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
         window.set_view_index(cpp_view, 0, 0)
         
@@ -68,30 +47,115 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
             
             html_content = self.generate_html(base_name, test_cases)
             
-            # --- 弹窗调试 6 ---
-            sublime.message_dialog("调试步骤 6: HTML内容已生成，即将调用 new_html_sheet。")
-
-            ui_sheet = window.new_html_sheet("测试用例: {}".format(base_name), html_content, group=1)
+            # 核心API：直接创建 HTML Sheet
+            # 在这里，我们将加入 on_navigate 回调，为下一步做准备
+            ui_sheet = window.new_html_sheet(
+                "测试用例: {}".format(base_name), 
+                html_content, 
+                group=1,
+                on_navigate=self.on_navigate # 关键：注册点击事件的回调函数
+            )
             ui_views[cpp_view.id()] = ui_sheet.id()
             window.focus_view(cpp_view)
 
         except Exception as e:
-            sublime.error_message("加载或渲染时发生未预料的错误: {}".format(e))
+            sublime.error_message("加载或渲染测试用例失败: {}".format(e))
             window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
             
+    def on_navigate(self, href):
+        """当用户点击 HTML 视图中的链接时，这个函数会被调用"""
+        # 我们将在下一个版本中实现这里的逻辑
+        sublime.message_dialog("您点击了链接: " + href)
+
     def generate_html(self, problem_name, test_cases):
-        try:
-            template = sublime.load_resource("Packages/cph-sublime/ui_template.html")
-        except IOError:
-            return "错误：找不到 ui_template.html 文件！"
+        # 模仿 VS Code CPH 的颜色变量和风格
+        styles = """
+        <style>
+            body { 
+                --green: #2ea043; --red: #f85149; --yellow: #cca700;
+                --blue: #0078d4; --bg-dark: #181818; --bg-light: #1f1f1f;
+                --border: #454545; --text-light: #cccccc; --text-dark: #9d9d9d;
+                font-family: sans-serif; background-color: var(--bg-dark); color: var(--text-light);
+                padding: 15px;
+            }
+            a { text-decoration: none; }
+            h1 { font-size: 1.5em; margin: 5px 0 20px 0; }
+            details { 
+                border-left: 4px solid var(--border);
+                margin-bottom: 15px; background-color: var(--bg-light);
+                padding: 10px;
+            }
+            summary {
+                font-weight: bold; cursor: pointer;
+                padding-bottom: 10px; list-style: none; /* 隐藏默认三角 */
+            }
+            summary::-webkit-details-marker { display: none; }
+            .case-header { display: block; } /* 使用 block 替代 flex */
+            .case-title { color: var(--blue); vertical-align: middle; }
+            .case-buttons { float: right; } /* 使用 float 让按钮靠右 */
+            .case-buttons a {
+                color: white; border-radius: 3px;
+                padding: 4px 8px; margin-left: 5px;
+                font-family: sans-serif; /* 确保图标字体不影响按钮 */
+            }
+            .run-btn { background-color: var(--green); }
+            .del-btn { background-color: var(--red); }
+            .content-block { border-top: 1px solid var(--border); padding-top: 10px; }
+            h4 {
+                margin: 10px 0 5px 0; color: var(--text-dark);
+                font-size: 0.9em; font-weight: normal;
+            }
+            pre {
+                white-space: pre-wrap; word-wrap: break-word;
+                background-color: var(--bg-dark); padding: 10px;
+                border-radius: 3px; font-family: monospace; margin: 0;
+            }
+            .global-buttons { margin-top: 20px; }
+            .global-buttons a {
+                display: block; margin-bottom: 10px;
+                text-align: center; padding: 8px; border-radius: 3px;
+                background-color: #313131; color: var(--text-light);
+            }
+            .global-buttons a:hover { background-color: #3c3c3c; }
+        </style>
+        """
+        
         test_cases_html = ""
         for i, case in enumerate(test_cases):
             test_input = cgi.escape(case.get('test', 'N/A'))
             answers_html = "<br>".join([cgi.escape(ans) for ans in case.get('correct_answers', [])])
-            case_html = "<details open><summary><span class='case-title'>TC {}</span><div class='case-buttons'><a href='run:{}' class='run-btn'>▶</a><a href='delete:{}' class='del-btn'>🗑</a></div></summary><div class='content-block'><h4><span>Input:</span><a class='copy-btn' href='copy_in:{}'>Copy</a></h4><pre>{}</pre></div><div class='content-block'><h4><span>Expected Output:</span><a class='copy-btn' href='copy_out:{}'>Copy</a></h4><pre>{}</pre></div></details>".format(i + 1, i, i, i, test_input, i, answers_html)
+
+            case_html = """
+            <details open>
+                <summary>
+                    <div class="case-header">
+                        <div class="case-buttons">
+                            <a href="run:{}" class="run-btn">▶</a>
+                            <a href="delete:{}" class="del-btn">🗑️</a>
+                        </div>
+                        <span class="case-title">TC {}</span>
+                    </div>
+                </summary>
+                <div class="content-block">
+                    <h4>Input:</h4>
+                    <pre>{}</pre>
+                </div>
+                <div class="content-block">
+                    <h4>Expected Output:</h4>
+                    <pre>{}</pre>
+                </div>
+            </details>
+            """.format(i, i, i + 1, test_input, answers_html)
             test_cases_html += case_html
-        final_html = template.replace("{problem_name}", cgi.escape(problem_name))
-        final_html = final_html.replace("{test_cases_html}", test_cases_html)
+
+        final_html = styles + "<h1>{}</h1>".format(cgi.escape(problem_name)) + test_cases_html
+        # 添加底部全局按钮
+        final_html += """
+            <div class="global-buttons">
+                <a href="new_case">✚ New Testcase</a>
+                <a href="run_all">► Run All</a>
+            </div>
+        """
         return final_html
 
     def find_sheet_by_id(self, window, sheet_id):
@@ -100,12 +164,12 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
                 return sheet
         return None
 
-# EventListener 和 RunTestsCommand 保持不变，请确保它们在您的文件中
+# EventListener 和 RunTestsCommand 保持不变
 class CphUiCleanupListener(sublime_plugin.EventListener):
     def on_pre_close(self, sheet):
         closed_id = sheet.id()
         if closed_id in ui_views:
-            window = sheet.window()
+            window = sheet.window();
             if not window: return
             ui_sheet_id = ui_views.get(closed_id)
             del ui_views[closed_id]
@@ -126,7 +190,8 @@ class CphUiCleanupListener(sublime_plugin.EventListener):
                 del ui_views[cpp_id_to_delete]
             window = sheet.window()
             if window and not any(s.id() in ui_views.values() for s in window.sheets()):
-                window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+                 window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+
 
 class CphRunTestsCommand(sublime_plugin.TextCommand):
     def run(self, edit):

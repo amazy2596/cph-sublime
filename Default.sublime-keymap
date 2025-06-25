@@ -1,6 +1,5 @@
+// 修改后的版本
 [
-    {
-        "keys": ["f1"],
-        "command": "cpp_helper_test_wsl"
-    }
+    { "keys": ["f1"], "command": "cpp_helper_run_tests" },
+    { "keys": ["f9"], "command": "cpp_helper_test_wsl" }
 ]

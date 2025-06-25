@@ -1,4 +1,5 @@
 [
     { "keys": ["f1"], "command": "cph_toggle_ui" },
-    { "keys": ["f2"], "command": "cph_run_tests" }
+    { "keys": ["f2"], "command": "cph_run_tests" },
+    { "keys": ["ctrl+f2"], "command": "cph_minimal_test" }
 ]

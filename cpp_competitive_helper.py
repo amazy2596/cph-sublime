@@ -177,3 +177,29 @@ class CphRunTestsCommand(sublime_plugin.TextCommand):
         process = subprocess.Popen(run_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout_bytes, _ = process.communicate(input=test_input.encode('utf-8'))
         return stdout_bytes.decode('utf-8')
+    
+# (请将这个类追加到文件的末尾)
+class CphMinimalTestCommand(sublime_plugin.WindowCommand):
+    """
+    一个极简的诊断命令，只做三件事：
+    1. 设置两栏布局
+    2. 在右侧创建一个新视图
+    3. 尝试向新视图写入 "Hello, World!"
+    """
+    def run(self):
+        window = self.window
+        
+        # 1. 设置布局
+        if window.num_groups() != 2:
+            window.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
+        
+        # 2. 创建新视图
+        new_view = window.new_file()
+        window.set_view_index(new_view, 1, 0)
+        new_view.set_name("诊断测试视图")
+
+        # 3. 尝试写入内容
+        # 我们使用 set_timeout 延迟执行，这有时能解决 API 调用的时序问题
+        # 这是一个非常常见的 Sublime 插件开发技巧
+        content_to_write = "Hello, World! 如果您能看到这句话，说明核心写入功能是正常的。"
+        sublime.set_timeout(lambda: new_view.run_command('_cph_update_view_content', {'content': content_to_write}), 100)

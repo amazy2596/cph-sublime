@@ -1,5 +1,5 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 2.2 - [BUG修复] 使用 stdbuf 解决 C++ 输出缓冲问题
+# 版本 2.3 - [功能增强] 运行前自动保存当前文件
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
@@ -9,38 +9,22 @@ import os
 import json
 
 class CppHelperTestWslCommand(sublime_plugin.TextCommand):
-    # ... (此处省略，保持不变)
     def run(self, edit):
         sublime.status_message("F1 是运行测试命令。")
 
 class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
-    # ... (run, log, compile_cpp 等方法保持不变，此处省略)
-    # ... 我们只修改 run_single_test 这一个方法
-    
-    def run_single_test(self, executable_path, test_input):
-        # 核心改动在这里！
-        # 我们不再直接运行可执行文件，而是通过 stdbuf -oL 来运行它
-        # 这会强制程序的输出变为“行缓冲”，从而解决 cout << ... << '\n' 的问题
-        run_command = ["stdbuf", "-oL", executable_path]
-        
-        process = subprocess.Popen(
-            run_command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        stdout_bytes, _ = process.communicate(input=test_input.encode('utf-8'))
-        return stdout_bytes.decode('utf-8')
-
-    # 为了方便您复制粘贴，下面是这个文件的完整内容
     def run(self, edit):
+        # --- 新增功能：运行前自动保存 ---
+        self.view.run_command("save")
+        
+        # --- 后续逻辑完全不变 ---
         self.file_path = self.view.file_name()
         if not self.file_path or not self.file_path.endswith('.cpp'):
             sublime.status_message("错误：请先在 C++ (.cpp) 文件中执行此命令")
             return
         self.output_panel = self.view.window().create_output_panel("cpp_helper_output")
         self.view.window().run_command("show_panel", {"panel": "output.cpp_helper_output"})
-        self.log("自动化测试开始...")
+        self.log("自动化测试开始... (已自动保存)")
         try:
             base_name = os.path.splitext(os.path.basename(self.file_path))[0]
             test_file_path = os.path.join(os.path.expanduser('~'), 'c++', 'data', 'input', base_name + '_test.txt')
@@ -103,3 +87,14 @@ class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
             return None
         self.log("编译成功, 可执行文件位于: {}".format(executable_path))
         return executable_path
+
+    def run_single_test(self, executable_path, test_input):
+        run_command = ["stdbuf", "-oL", executable_path]
+        process = subprocess.Popen(
+            run_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout_bytes, _ = process.communicate(input=test_input.encode('utf-8'))
+        return stdout_bytes.decode('utf-8')

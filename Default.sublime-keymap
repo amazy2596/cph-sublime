@@ -1,0 +1,6 @@
+[
+    {
+        "keys": ["f1"],
+        "command": "cpp_helper_test_wsl"
+    }
+]

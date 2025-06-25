@@ -1,14 +1,14 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 3.1 - [BUG修复] 修正关闭文件时因递归调用导致的 KeyError
+# 版本 3.2 - [调试] 增加路径查找的调试信息
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
 import sublime_plugin
+# ... (其他 import 和全局变量不变)
 import subprocess
 import os
 import json
 
-# 全局变量来追踪我们的 UI 视图: { 'cpp_view_id': ui_view_id }
 ui_views = {}
 
 class CppHelperEventListener(sublime_plugin.EventListener):
@@ -18,40 +18,25 @@ class CppHelperEventListener(sublime_plugin.EventListener):
             return
         view.run_command('cpp_helper_show_ui')
 
-    # --- 这是修正后的 on_pre_close 函数 ---
     def on_pre_close(self, view):
         view_id = view.id()
-
-        # 情况一：如果关闭的是一个有对应 UI 视图的 C++ 文件
         if view_id in ui_views:
             ui_view = sublime.View(ui_views[view_id])
-            
-            # 关键：先从我们的追踪字典中删除记录
             del ui_views[view_id]
-            
-            # 然后再安全地关闭 UI 视图（此时即使触发递归，也不会有问题）
             if ui_view and ui_view.is_valid():
                 ui_view.set_scratch(False)
                 ui_view.window().focus_view(ui_view)
                 ui_view.window().run_command("close_file")
-
-        # 情况二：如果关闭的是一个 UI 视图本身
-        # (因为上一步已经处理了联动关闭，这里主要处理用户手动关闭UI视图的情况)
         elif view_id in ui_views.values():
             cpp_id_to_delete = None
-            # 遍历字典找到这个 UI 视图属于哪个 C++ 文件
             for cpp_id, ui_id in list(ui_views.items()):
                 if ui_id == view_id:
                     cpp_id_to_delete = cpp_id
                     break
-            
-            # 如果找到了，就从字典中删除
             if cpp_id_to_delete is not None and cpp_id_to_delete in ui_views:
                 del ui_views[cpp_id_to_delete]
 
-# ... CppHelperShowUiCommand 和 CppHelperRunTestsCommand 的代码和上一版完全一样 ...
-# 为了方便您完整复制，下面将所有代码一并提供
-
+# --- 我们只修改这个命令，增加调试信息 ---
 class CppHelperShowUiCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         window = self.view.window()
@@ -59,7 +44,12 @@ class CppHelperShowUiCommand(sublime_plugin.TextCommand):
         file_path = self.view.file_name()
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         test_file_path = os.path.join(os.path.expanduser('~'), 'c++', 'data', 'input', base_name + '_test.txt')
+
+        # --- 核心调试改动在这里 ---
         if not os.path.exists(test_file_path):
+            # 在 Sublime 底部状态栏显示调试信息
+            sublime.status_message("调试信息：未找到测试文件 -> {}".format(test_file_path))
+            # 后续关闭旧UI的逻辑不变
             if self.view.id() in ui_views:
                 ui_view = sublime.View(ui_views[self.view.id()])
                 if ui_view and ui_view.is_valid():
@@ -68,6 +58,12 @@ class CppHelperShowUiCommand(sublime_plugin.TextCommand):
                     ui_view.window().run_command("close_file")
                 del ui_views[self.view.id()]
             return
+        else:
+            # 如果找到了文件，也在状态栏给一个正面反馈
+            sublime.status_message("调试信息：已找到测试文件 -> {}".format(test_file_path))
+        
+        # --- 后续创建和渲染UI的逻辑完全不变 ---
+        # ... (此处省略，和上一版完全一样)
         if window.num_groups() != 2:
             layout = {"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]}
             window.set_layout(layout)
@@ -103,6 +99,7 @@ class CppHelperShowUiCommand(sublime_plugin.TextCommand):
         except Exception as e:
             ui_view.run_command('append', {'characters': "加载测试用例失败: {}".format(e)})
 
+# CppHelperRunTestsCommand 保持不变，此处省略
 class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         self.view.run_command("save")
@@ -161,7 +158,6 @@ class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
 
     def log(self, message):
         self.output_panel.run_command("append", {"characters": message + "\n"})
-        
     def compile_cpp(self):
         base_name = os.path.splitext(self.file_path)[0]
         executable_path = base_name
@@ -175,14 +171,8 @@ class CppHelperRunTestsCommand(sublime_plugin.TextCommand):
             return None
         self.log("编译成功, 可执行文件位于: {}".format(executable_path))
         return executable_path
-
     def run_single_test(self, executable_path, test_input):
         run_command = ["stdbuf", "-oL", executable_path]
-        process = subprocess.Popen(
-            run_command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+        process = subprocess.Popen(run_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout_bytes, _ = process.communicate(input=test_input.encode('utf-8'))
         return stdout_bytes.decode('utf-8')

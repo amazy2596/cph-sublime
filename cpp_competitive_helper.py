@@ -1,5 +1,5 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 4.0 - [重构] 废除 EventListener，改为手动开关式 UI
+# 版本 4.1 - [BUG修复] 使用更可靠的方式向 UI 视图写入内容
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
@@ -19,24 +19,21 @@ class CphToggleUiCommand(sublime_plugin.TextCommand):
         window = self.view.window()
         cpp_view = self.view
         
-        # 检查是否已为当前 CPP 文件打开了 UI
         ui_view_id = ui_views.get(cpp_view.id())
         
         # --- 情况一：UI 已打开，现在需要关闭它 ---
         if ui_view_id:
             ui_view = self.find_view_by_id(window, ui_view_id)
             if ui_view and ui_view.is_valid():
-                # 先关闭视图
                 ui_view.set_scratch(False)
                 window.focus_view(ui_view)
                 window.run_command("close_file")
             
-            # 从追踪字典中移除
-            del ui_views[cpp_view.id()]
+            if cpp_view.id() in ui_views:
+                del ui_views[cpp_view.id()]
             
-            # 恢复单栏布局
             window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
-            window.focus_view(cpp_view) # 将焦点还给 C++ 文件
+            window.focus_view(cpp_view)
             return
 
         # --- 情况二：UI 未打开，现在需要创建它 ---
@@ -51,11 +48,9 @@ class CphToggleUiCommand(sublime_plugin.TextCommand):
             sublime.status_message("未找到对应的测试文件: {}".format(test_file_path))
             return
 
-        # 设置两栏布局
         window.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
         window.set_view_index(cpp_view, 0, 0)
         
-        # 创建新视图
         ui_view = window.new_file()
         window.set_view_index(ui_view, 1, 0)
         ui_views[cpp_view.id()] = ui_view.id()
@@ -78,31 +73,36 @@ class CphToggleUiCommand(sublime_plugin.TextCommand):
                     content += "{}\n".format(ans)
                 content += "\n"
             
-            # 调用内部命令来更新视图内容
-            ui_view.run_command('_cph_update_view_content', {'content': content})
-            ui_view.set_read_only(True)
-            window.focus_view(cpp_view) # 将焦点还给 C++ 文件
+            # --- 核心改动在这里：使用更直接的方式更新内容 ---
+            self.update_view_content(ui_view, content)
+            
+            window.focus_view(cpp_view)
 
         except Exception as e:
-            ui_view.run_command('_cph_update_view_content', {'content': "加载测试用例失败: {}".format(e)})
+            error_content = "加载测试用例失败: {}".format(e)
+            self.update_view_content(ui_view, error_content)
     
+    def update_view_content(self, view, content):
+        """一个辅助方法，使用 begin_edit/end_edit 来安全地修改视图内容"""
+        view.set_read_only(False)
+        # begin_edit() 的第一个参数在 Python 3.3 的 API 中是可选的
+        edit = view.begin_edit()
+        try:
+            view.replace(edit, sublime.Region(0, view.size()), content)
+        finally:
+            # 必须调用 end_edit 来结束编辑操作
+            view.end_edit(edit)
+        view.set_read_only(True)
+
     def find_view_by_id(self, window, view_id):
         for view in window.views():
             if view.id() == view_id:
                 return view
         return None
 
-class _CphUpdateViewContentCommand(sublime_plugin.TextCommand):
-    """
-    一个内部使用的辅助命令，专门用于安全地修改视图内容。
-    不能从外部直接调用。
-    """
-    def run(self, edit, content=''):
-        self.view.set_read_only(False)
-        self.view.replace(edit, sublime.Region(0, self.view.size()), content)
-        self.view.set_read_only(True)
+# `_CphUpdateViewContentCommand` 已被删除
 
-# CppHelperRunTestsCommand 保持不变，但我们改个名以统一风格
+# CphRunTestsCommand 保持不变
 class CphRunTestsCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         self.view.run_command("save")

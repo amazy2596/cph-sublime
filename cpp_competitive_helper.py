@@ -1,5 +1,5 @@
 # 文件: CppCompetitiveHelper/cpp_competitive_helper.py
-# 版本 4.2 - [架构修复] 使用 WindowCommand 和 TextCommand 的正确组合，解决 TypeError 崩溃问题
+# 版本 5.0 - [最终修复] 使用 new_html_sheet API 实现 HTML UI
 # *** Python 3.3 完全兼容版本 ***
 
 import sublime
@@ -8,34 +8,29 @@ import subprocess
 import os
 import json
 
-# 全局变量来追踪 UI 视图: { 'cpp_view_id': ui_view_id }
+# 全局变量来追踪 UI 视图: { 'cpp_view_id': html_sheet_id }
 ui_views = {}
 
-# --- 主命令改为 WindowCommand，因为它操作的是窗口布局和多视图 ---
 class CphToggleUiCommand(sublime_plugin.WindowCommand):
+    """
+    主命令：使用正确的 new_html_sheet API 打开或关闭右侧的 HTML 测试用例面板。
+    """
     def run(self):
         window = self.window
-        # WindowCommand 没有直接的 self.view，我们需要获取当前活动的视图
         cpp_view = window.active_view()
         
         if not cpp_view or not cpp_view.file_name():
             return
 
-        ui_view_id = ui_views.get(cpp_view.id())
+        ui_sheet_id = ui_views.get(cpp_view.id())
         
         # --- 情况一：UI 已打开，现在需要关闭它 ---
-        if ui_view_id:
-            ui_view = self.find_view_by_id(window, ui_view_id)
-            if ui_view and ui_view.is_valid():
-                ui_view.set_scratch(False)
-                window.focus_view(ui_view)
-                window.run_command("close_file")
+        if ui_sheet_id:
+            ui_sheet = self.find_sheet_by_id(window, ui_sheet_id)
+            if ui_sheet:
+                ui_sheet.close() # 使用 sheet.close() 是最安全的关闭方法
             
-            if cpp_view.id() in ui_views:
-                del ui_views[cpp_view.id()]
-            
-            window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
-            window.focus_view(cpp_view)
+            # on_pre_close 事件会自动处理字典清理和布局恢复
             return
 
         # --- 情况二：UI 未打开，现在需要创建它 ---
@@ -50,55 +45,107 @@ class CphToggleUiCommand(sublime_plugin.WindowCommand):
             sublime.status_message("未找到对应的测试文件: {}".format(test_file_path))
             return
 
+        # 设置两栏布局
         window.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
         window.set_view_index(cpp_view, 0, 0)
         
-        ui_view = window.new_file()
-        window.set_view_index(ui_view, 1, 0)
-        ui_views[cpp_view.id()] = ui_view.id()
-        ui_view.set_name("测试用例: {}".format(base_name))
-        ui_view.set_scratch(True)
-        
+        # 加载并生成 HTML 内容
         try:
             with open(test_file_path, 'r') as f:
                 test_cases = json.load(f)
             
-            content = "测试文件: {}\n".format(test_file_path)
-            content += "=" * 40 + "\n\n"
-            for i, case in enumerate(test_cases):
-                content += "--- 测试点 #{} ---\n".format(i + 1)
-                content += "输入 (Input):\n{}\n".format(case.get('test', 'N/A'))
-                answers = case.get('correct_answers', [])
-                content += "答案 (Answers):\n"
-                for ans in answers:
-                    content += "{}\n".format(ans)
-                content += "\n"
+            # 使用 HTML 格式化内容
+            html_content = self.generate_html(test_cases)
             
-            # 核心改动：调用一个 TextCommand 来安全地写入内容
-            ui_view.run_command('_cph_update_view_content', {'content': content})
+            # 核心API：直接创建 HTML Sheet
+            ui_sheet = window.new_html_sheet("测试用例: {}".format(base_name), html_content, group=1)
+            
+            # 记录 C++ 视图和 UI Sheet 的对应关系
+            ui_views[cpp_view.id()] = ui_sheet.id()
+            window.focus_view(cpp_view)
 
         except Exception as e:
-            error_content = "加载测试用例失败: {}".format(e)
-            ui_view.run_command('_cph_update_view_content', {'content': error_content})
-        
-        # 将焦点还给 C++ 文件
-        window.focus_view(cpp_view)
+            sublime.error_message("加载测试用例失败: {}".format(e))
+            # 如果失败了，恢复单栏布局
+            window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+            
+    def generate_html(self, test_cases):
+        # 使用简单的 HTML 和 CSS 来美化界面
+        # 注意：Sublime 的 minihtml 支持有限的 CSS
+        styles = """
+        <style>
+            body { padding: 10px; font-family: sans-serif; }
+            h3 { color: #4e8ed6; border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 20px;}
+            h4 { color: #999; }
+            pre { background-color: #222; padding: 10px; border-radius: 5px; font-family: monospace; }
+        </style>
+        """
+        body = ""
+        for i, case in enumerate(test_cases):
+            test_input = case.get('test', 'N/A').replace('\n', '<br>')
+            
+            answers_html = ""
+            answers = case.get('correct_answers', [])
+            for ans in answers:
+                answers_html += ans.replace('\n', '<br>') + "<br>"
 
-    def find_view_by_id(self, window, view_id):
-        for view in window.views():
-            if view.id() == view_id:
-                return view
+            body += "<h3>测试点 #{}</h3>".format(i + 1)
+            body += "<h4>输入 (Input):</h4><pre>{}</pre>".format(test_input)
+            body += "<h4>答案 (Answers):</h4><pre>{}</pre>".format(answers_html)
+
+        return styles + body
+
+    def find_sheet_by_id(self, window, sheet_id):
+        for sheet in window.sheets():
+            if sheet.id() == sheet_id:
+                return sheet
         return None
 
-# --- 重新引入这个内部辅助命令，它是一个 TextCommand ---
-class _CphUpdateViewContentCommand(sublime_plugin.TextCommand):
-    def run(self, edit, content=''):
-        self.view.set_read_only(False)
-        self.view.erase(edit, sublime.Region(0, self.view.size()))
-        self.view.insert(edit, 0, content)
-        self.view.set_read_only(True)
+# --- 这个监听器现在只负责清理工作 ---
+class CphUiCleanupListener(sublime_plugin.EventListener):
+    def on_pre_close(self, view_or_sheet):
+        # view_or_sheet 可以是 View 也可以是 Sheet
+        closed_id = view_or_sheet.id()
 
-# CphRunTestsCommand 保持不变
+        # 情况一：如果关闭的是一个 C++ 文件
+        if closed_id in ui_views:
+            window = view_or_sheet.window()
+            if not window: return
+            
+            ui_sheet_id = ui_views.get(closed_id)
+            ui_sheet = CphToggleUiCommand.find_sheet_by_id(CphToggleUiCommand, window, ui_sheet_id)
+            
+            if ui_sheet:
+                # 标记正在被插件关闭，防止触发自己的 on_pre_close 时再次进入逻辑
+                ui_sheet.settings().set('is_closing_by_plugin', True)
+                ui_sheet.close()
+            
+            del ui_views[closed_id]
+            # 如果没有其他 UI 了，恢复布局
+            if not ui_views:
+                window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+
+        # 情况二：如果关闭的是 UI Sheet
+        elif closed_id in ui_views.values():
+            if view_or_sheet.settings().get('is_closing_by_plugin'):
+                return # 如果是插件自己关的，就不用再处理了
+            
+            cpp_id_to_delete = None
+            for cpp_id, ui_id in list(ui_views.items()):
+                if ui_id == closed_id:
+                    cpp_id_to_delete = cpp_id
+                    break
+            
+            if cpp_id_to_delete is not None:
+                del ui_views[cpp_id_to_delete]
+            
+            # 如果没有其他 UI 了，恢复布局
+            if not ui_views:
+                window = view_or_sheet.window()
+                if window:
+                     window.set_layout({"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]})
+
+# --- 测试运行命令保持不变 ---
 class CphRunTestsCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         self.view.run_command("save")
@@ -177,29 +224,3 @@ class CphRunTestsCommand(sublime_plugin.TextCommand):
         process = subprocess.Popen(run_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout_bytes, _ = process.communicate(input=test_input.encode('utf-8'))
         return stdout_bytes.decode('utf-8')
-    
-# (请将这个类追加到文件的末尾)
-class CphMinimalTestCommand(sublime_plugin.WindowCommand):
-    """
-    一个极简的诊断命令，只做三件事：
-    1. 设置两栏布局
-    2. 在右侧创建一个新视图
-    3. 尝试向新视图写入 "Hello, World!"
-    """
-    def run(self):
-        window = self.window
-        
-        # 1. 设置布局
-        if window.num_groups() != 2:
-            window.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
-        
-        # 2. 创建新视图
-        new_view = window.new_file()
-        window.set_view_index(new_view, 1, 0)
-        new_view.set_name("诊断测试视图")
-
-        # 3. 尝试写入内容
-        # 我们使用 set_timeout 延迟执行，这有时能解决 API 调用的时序问题
-        # 这是一个非常常见的 Sublime 插件开发技巧
-        content_to_write = "Hello, World! 如果您能看到这句话，说明核心写入功能是正常的。"
-        sublime.set_timeout(lambda: new_view.run_command('_cph_update_view_content', {'content': content_to_write}), 100)
